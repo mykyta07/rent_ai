@@ -1,0 +1,264 @@
+import google.generativeai as genai
+from django.conf import settings
+from properties.models import Property
+from ai.models import PropertyEmbedding, ChatMessage
+import numpy as np
+import json
+
+
+class GeminiService:
+    """Сервіс для роботи з Gemini API"""
+    
+    def __init__(self):
+        genai.configure(api_key=settings.GEMINI_API_KEY)
+        # Gemini Flash Latest - найновіша стабільна версія
+        self.model = genai.GenerativeModel('models/gemini-flash-latest')
+        self.embedding_model = 'models/text-embedding-004'
+    
+    def generate_chat_response(self, user_message, user_id, conversation_history=None):
+        """
+        Генерує відповідь чат-асистента з урахуванням бази даних нерухомості
+        """
+        # Отримуємо всі об'єкти нерухомості для контексту
+        properties = Property.objects.select_related('location').all()
+        
+        # Формуємо контекст про доступні об'єкти
+        properties_context = self._format_properties_context(properties)
+        
+        # Історія розмови
+        history_text = ""
+        if conversation_history:
+            history_text = "\n".join([
+                f"{msg.role}: {msg.content}" 
+                for msg in conversation_history
+            ])
+        
+        # Промпт для Gemini
+        prompt = f"""
+Ти - AI асистент з нерухомості. Твоя задача - допомагати користувачам знаходити підходящу нерухомість.
+
+БАЗА ДАНИХ НЕРУХОМОСТІ:
+{properties_context}
+
+ІСТОРІЯ РОЗМОВИ:
+{history_text}
+
+ПОВІДОМЛЕННЯ КОРИСТУВАЧА:
+{user_message}
+
+ІНСТРУКЦІЇ:
+1. Проаналізуй запит користувача
+2. Визнач чи користувач шукає ОРЕНДУ чи ПРОДАЖ (ключові слова: орендувати, знімати, здати, rent - це оренда; купити, придбати, продаж, buy - це продаж)
+3. Знайди відповідні об'єкти з бази даних за параметрами:
+   - Тип угоди (Оренда/Продаж)
+   - Кількість кімнат
+   - Район/місто
+   - Ціна (УВАГА: ціни в грн або $ - не плутай!)
+4. Надай конкретні рекомендації з ID об'єктів у форматі "ID: X"
+5. Будь дружнім та професійним
+6. Відповідай українською мовою
+
+ВАЖЛИВО: 
+- Якщо користувач шукає оренду - показуй ТІЛЬКИ об'єкти з типом "Оренда"
+- Якщо користувач шукає купівлю - показуй ТІЛЬКИ об'єкти з типом "Продаж"
+- Завжди вказуй ID об'єктів у форматі "ID: X"
+- Ціни можуть бути в $ (доларах) або грн (гривнях) - вказуй валюту!
+- Оренда зазвичай в гривнях (грн), продаж - в доларах ($)
+"""
+        
+        response = self.model.generate_content(prompt)
+        
+        # Зберігаємо повідомлення в БД
+        ChatMessage.objects.create(
+            user_id=user_id,
+            role='user',
+            content=user_message
+        )
+        ChatMessage.objects.create(
+            user_id=user_id,
+            role='assistant',
+            content=response.text
+        )
+        
+        # Аналізуємо відповідь для виявлення згаданих ID
+        mentioned_property_ids = self._extract_property_ids(response.text, properties)
+        
+        return {
+            'assistant_message': response.text,
+            'properties': mentioned_property_ids
+        }
+    
+    def generate_embedding(self, text):
+        """
+        Генерує embedding для тексту через Gemini
+        """
+        result = genai.embed_content(
+            model=self.embedding_model,
+            content=text,
+            task_type="retrieval_document"
+        )
+        return result['embedding']
+    
+    def semantic_search(self, query, top_k=5):
+        """
+        Семантичний пошук об'єктів за описом
+        """
+        # Генеруємо embedding для запиту
+        query_embedding = genai.embed_content(
+            model=self.embedding_model,
+            content=query,
+            task_type="retrieval_query"
+        )['embedding']
+        
+        # Отримуємо всі embedding з БД
+        property_embeddings = PropertyEmbedding.objects.select_related(
+            'property', 'property__location'
+        ).all()
+        
+        if not property_embeddings:
+            # Якщо embeddings не створені, створюємо їх
+            self._create_embeddings_for_all_properties()
+            property_embeddings = PropertyEmbedding.objects.select_related(
+                'property', 'property__location'
+            ).all()
+        
+        # Обчислюємо косинусну схожість
+        results = []
+        for prop_emb in property_embeddings:
+            doc_embedding = prop_emb.embedding
+            similarity = self._cosine_similarity(query_embedding, doc_embedding)
+            results.append({
+                'property': prop_emb.property,
+                'similarity_score': similarity
+            })
+        
+        # Сортуємо за схожістю
+        results.sort(key=lambda x: x['similarity_score'], reverse=True)
+        
+        return results[:top_k]
+    
+    def explain_property(self, property_id, user_preferences=""):
+        """
+        Пояснює, чому обрано конкретний об'єкт
+        """
+        try:
+            property_obj = Property.objects.select_related('location').get(id=property_id)
+        except Property.DoesNotExist:
+            return "Об'єкт не знайдено"
+        
+        property_info = self._format_single_property(property_obj)
+        
+        prompt = f"""
+Ти - експерт з нерухомості. Поясни, чому цей об'єкт може бути хорошим вибором.
+
+ІНФОРМАЦІЯ ПРО ОБ'ЄКТ:
+{property_info}
+
+ПЕРЕВАГИ КОРИСТУВАЧА:
+{user_preferences if user_preferences else "Не вказано"}
+
+Надай детальне пояснення переваг та недоліків об'єкта. Відповідай українською мовою.
+"""
+        
+        response = self.model.generate_content(prompt)
+        return response.text
+    
+    def compare_properties(self, property_ids):
+        """
+        Порівнює 2-3 об'єкти і повертає текстове резюме
+        """
+        properties = Property.objects.select_related('location').filter(
+            id__in=property_ids
+        )
+        
+        if properties.count() < 2:
+            return "Недостатньо об'єктів для порівняння"
+        
+        comparison_data = "\n\n".join([
+            f"ОБ'ЄКТ {i+1} (ID: {prop.id}):\n{self._format_single_property(prop)}"
+            for i, prop in enumerate(properties)
+        ])
+        
+        prompt = f"""
+Ти - експерт з нерухомості. Порівняй наступні об'єкти:
+
+{comparison_data}
+
+Надай детальне порівняння за критеріями:
+- Ціна та співвідношення ціна/якість
+- Локація та інфраструктура
+- Площа та планування
+- Стан та характеристики будинку
+- Загальна рекомендація
+
+Відповідай українською мовою.
+"""
+        
+        response = self.model.generate_content(prompt)
+        return response.text
+    
+    def _format_properties_context(self, properties, limit=50):
+        """Форматує список об'єктів для контексту"""
+        context_parts = []
+        for prop in properties[:limit]:
+            location = prop.location if hasattr(prop, 'location') else None
+            district = location.district if location else "Не вказано"
+            
+            # Визначаємо тип угоди
+            sale_type_display = "Продаж" if prop.sale_type == "sale" else "Оренда"
+            
+            context_parts.append(
+                f"ID: {prop.id} | {sale_type_display} | {prop.title} | "
+                f"{prop.rooms_count} кімн. | {prop.total_area} м² | "
+                f"{prop.price} {prop.currency} | Район: {district}"
+            )
+        
+        return "\n".join(context_parts)
+    
+    def _format_single_property(self, prop):
+        """Форматує один об'єкт для детального аналізу"""
+        location = prop.location if hasattr(prop, 'location') else None
+        
+        return f"""
+Назва: {prop.title}
+Опис: {prop.description}
+Ціна: {prop.price} {prop.currency}
+Тип: {prop.get_realty_type_display()}
+Тип угоди: {prop.get_sale_type_display()}
+Кімнат: {prop.rooms_count}
+Загальна площа: {prop.total_area} м²
+Житлова площа: {prop.living_area} м²
+Площа кухні: {prop.kitchen_area} м²
+Поверх: {prop.floor} з {prop.floors_count}
+Тип будинку: {prop.building_type}
+Локація: {location.district if location else 'Не вказано'}, {location.street if location else ''}
+Метро: {location.metro_station if location and location.metro_station else 'Не вказано'} ({location.metro_distance_minutes if location and location.metro_distance_minutes else '?'} хв)
+"""
+    
+    def _extract_property_ids(self, text, properties):
+        """Витягує ID об'єктів, згаданих у відповіді"""
+        mentioned_ids = []
+        for prop in properties:
+            if f"ID: {prop.id}" in text or f"#{prop.id}" in text:
+                mentioned_ids.append(prop.id)
+        return mentioned_ids
+    
+    def _cosine_similarity(self, vec1, vec2):
+        """Обчислює косинусну схожість між двома векторами"""
+        vec1 = np.array(vec1)
+        vec2 = np.array(vec2)
+        return np.dot(vec1, vec2) / (np.linalg.norm(vec1) * np.linalg.norm(vec2))
+    
+    def _create_embeddings_for_all_properties(self):
+        """Створює embeddings для всіх об'єктів без них"""
+        properties = Property.objects.filter(embedding__isnull=True)
+        
+        for prop in properties:
+            text = f"{prop.title}. {prop.description}"
+            embedding = self.generate_embedding(text)
+            
+            PropertyEmbedding.objects.create(
+                property=prop,
+                embedding=embedding,
+                model_name=self.embedding_model
+            )
