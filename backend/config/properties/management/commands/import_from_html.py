@@ -18,14 +18,15 @@ class Command(BaseCommand):
         parser.add_argument(
             '--file',
             type=str,
-            required=True,
-            help='Filename in html/ folder (e.g., page1.html)'
+            required=False,
+            default=None,
+            help='Filename in html/ folder (e.g., page1.html). If not specified, imports from all HTML files'
         )
         parser.add_argument(
             '--limit',
             type=int,
             default=None,
-            help='Maximum number of properties to import'
+            help='Maximum number of properties to import per file'
         )
 
     def handle(self, *args, **options):
@@ -35,25 +36,65 @@ class Command(BaseCommand):
         # Get project root (parent of config folder)
         project_root = Path(settings.BASE_DIR).parent
         html_folder = project_root / 'html'
-        html_file = html_folder / filename
         
         # Create html folder if doesn't exist
         html_folder.mkdir(exist_ok=True)
         
-        if not html_file.exists():
-            self.stdout.write(self.style.ERROR(f'File not found: {html_file}'))
-            self.stdout.write(f'Please place HTML files in: {html_folder}')
+        # If specific file is provided, process only that file
+        if filename:
+            html_file = html_folder / filename
+            if not html_file.exists():
+                self.stdout.write(self.style.ERROR(f'File not found: {html_file}'))
+                self.stdout.write(f'Please place HTML files in: {html_folder}')
+                
+                # List available files
+                html_files = list(html_folder.glob('*.html'))
+                if html_files:
+                    self.stdout.write('\nAvailable files:')
+                    for f in html_files:
+                        self.stdout.write(f'  - {f.name}')
+                return
             
-            # List available files
-            html_files = list(html_folder.glob('*.html'))
-            if html_files:
-                self.stdout.write('\nAvailable files:')
-                for f in html_files:
-                    self.stdout.write(f'  - {f.name}')
-            return
+            files_to_process = [html_file]
+        else:
+            # Process all HTML files in the folder
+            files_to_process = sorted(html_folder.glob('*.html'))
+            
+            if not files_to_process:
+                self.stdout.write(self.style.WARNING(f'No HTML files found in: {html_folder}'))
+                self.stdout.write(f'Please place HTML files in: {html_folder}')
+                return
+            
+            self.stdout.write(self.style.SUCCESS(f'📁 Found {len(files_to_process)} HTML files to process'))
         
-        self.stdout.write(f'Reading HTML from: {html_file}')
+        # Statistics for all files
+        total_imported = 0
+        total_skipped = 0
+        total_errors = 0
         
+        # Process each file
+        for html_file in files_to_process:
+            self.stdout.write(self.style.SUCCESS(f'\n📄 Processing: {html_file.name}'))
+            self.stdout.write('─' * 60)
+            
+            stats = self.process_file(html_file, limit)
+            
+            total_imported += stats['imported']
+            total_skipped += stats['skipped']
+            total_errors += stats['errors']
+            
+            self.stdout.write(self.style.SUCCESS(
+                f'✅ {html_file.name}: {stats["imported"]} imported, {stats["skipped"]} skipped, {stats["errors"]} errors'
+            ))
+        
+        # Final summary
+        self.stdout.write('\n' + '═' * 60)
+        self.stdout.write(self.style.SUCCESS(
+            f'🎉 TOTAL: {total_imported} imported, {total_skipped} skipped, {total_errors} errors from {len(files_to_process)} file(s)'
+        ))
+
+    def process_file(self, html_file, limit):
+        """Process a single HTML file and return statistics"""
         with open(html_file, 'r', encoding='utf-8') as f:
             html_content = f.read()
         
@@ -177,9 +218,11 @@ class Command(BaseCommand):
                 )
                 continue
         
-        self.stdout.write(self.style.SUCCESS(
-            f'\n✅ Import complete: {imported} imported, {skipped} skipped, {errors} errors'
-        ))
+        return {
+            'imported': imported,
+            'skipped': skipped,
+            'errors': errors
+        }
 
     def parse_price(self, price_text):
         """Parse price and currency from text like '60 000 $' or '15 000 грн'"""
