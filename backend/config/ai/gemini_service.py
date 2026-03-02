@@ -13,7 +13,7 @@ class GeminiService:
         genai.configure(api_key=settings.GEMINI_API_KEY)
         # Gemini Flash Latest - найновіша стабільна версія
         self.model = genai.GenerativeModel('models/gemini-flash-latest')
-        self.embedding_model = 'models/text-embedding-004'
+        self.embedding_model = 'models/gemini-embedding-001'
     
     def generate_chat_response(self, user_message, user_id, conversation_history=None):
         """
