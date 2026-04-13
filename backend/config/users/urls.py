@@ -18,6 +18,7 @@ urlpatterns = [
     
     # Профіль користувача
     path('auth/profile/', UserProfileView.as_view(), name='user-profile'),
+    path('users/me/', UserProfileView.as_view(), name='user-me'),
     path('auth/change-password/', ChangePasswordView.as_view(), name='change-password'),
     
     # Список користувачів

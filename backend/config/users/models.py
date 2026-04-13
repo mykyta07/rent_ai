@@ -3,14 +3,12 @@ from django.contrib.auth.models import AbstractUser
 
 class User(AbstractUser):
     ROLE_CHOICES = [
-        ("student", "Студент"),
-        ("family", "Сім'я"),
-        ("investor", "Інвестор"),
+        ("user", "Користувач"),
     ]
 
     role = models.CharField(
         max_length=20,
         choices=ROLE_CHOICES,
-        default="student"
+        default="user"
     )
 

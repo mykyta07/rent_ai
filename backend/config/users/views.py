@@ -30,8 +30,7 @@ User = get_user_model()
                 "password": "SecurePassword123",
                 "password_confirm": "SecurePassword123",
                 "first_name": "John",
-                "last_name": "Doe",
-                "role": "student"
+                "last_name": "Doe"
             }
         )
     ],
@@ -50,8 +49,7 @@ class RegisterView(generics.CreateAPIView):
         "password": "SecurePassword123",
         "password_confirm": "SecurePassword123",
         "first_name": "John",
-        "last_name": "Doe",
-        "role": "student"
+        "last_name": "Doe"
     }
     
     Response:
@@ -62,7 +60,7 @@ class RegisterView(generics.CreateAPIView):
             "email": "john@example.com",
             "first_name": "John",
             "last_name": "Doe",
-            "role": "student"
+            "role": "buyer"
         },
         "tokens": {
             "refresh": "eyJ0eXAiOiJKV1QiLCJhbGc...",
@@ -171,8 +169,7 @@ class UserProfileView(generics.RetrieveUpdateAPIView):
     {
         "first_name": "John",
         "last_name": "Doe",
-        "email": "newemail@example.com",
-        "role": "family"
+        "email": "newemail@example.com"
     }
     """
     permission_classes = (IsAuthenticated,)
