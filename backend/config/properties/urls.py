@@ -1,6 +1,7 @@
 from django.urls import path
 from .views import (
     PropertyListView,
+    MyPropertyListView,
     PropertyDetailView,
     PropertyCreateView,
     PropertyUpdateView,
@@ -12,6 +13,7 @@ from .views import (
 urlpatterns = [
     # Список та створення
     path('', PropertyListView.as_view(), name='property-list'),
+    path('my/', MyPropertyListView.as_view(), name='property-my-list'),
     path('create/', PropertyCreateView.as_view(), name='property-create'),
     
     # Деталі, оновлення, видалення

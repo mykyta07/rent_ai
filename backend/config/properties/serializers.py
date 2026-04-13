@@ -28,13 +28,14 @@ class PropertyListSerializer(serializers.ModelSerializer):
     """Серіалізатор для списку об'єктів (мінімальна інформація)"""
     location = LocationSerializer(read_only=True)
     main_photo = serializers.SerializerMethodField()
+    is_mine = serializers.SerializerMethodField()
 
     class Meta:
         model = Property
         fields = [
             'id', 'title', 'price', 'currency',
             'rooms_count', 'total_area', 'realty_type', 'sale_type',
-            'location', 'main_photo'
+            'location', 'main_photo', 'is_mine'
         ]
 
     def get_main_photo(self, obj):
@@ -44,11 +45,18 @@ class PropertyListSerializer(serializers.ModelSerializer):
         first_photo = obj.photos.first()
         return first_photo.url if first_photo else None
 
+    def get_is_mine(self, obj):
+        request = self.context.get('request')
+        if not request or not request.user.is_authenticated:
+            return False
+        return obj.owner_id == request.user.id
+
 
 class PropertyDetailSerializer(serializers.ModelSerializer):
     """Детальний серіалізатор з усією інформацією"""
     location = LocationSerializer(read_only=True)
     photos = PropertyPhotoSerializer(many=True, read_only=True)
+    is_mine = serializers.SerializerMethodField()
 
     class Meta:
         model = Property
@@ -57,8 +65,14 @@ class PropertyDetailSerializer(serializers.ModelSerializer):
             'price', 'currency', 'rooms_count', 'total_area',
             'living_area', 'kitchen_area', 'floor', 'floors_count',
             'building_type', 'is_commercial', 'realty_type', 'sale_type',
-            'location', 'photos', 'created_at'
+            'location', 'photos', 'created_at', 'is_mine'
         ]
+
+    def get_is_mine(self, obj):
+        request = self.context.get('request')
+        if not request or not request.user.is_authenticated:
+            return False
+        return obj.owner_id == request.user.id
 
 
 class PropertyCreateSerializer(serializers.ModelSerializer):

@@ -32,6 +32,7 @@ from .serializers import (
         OpenApiParameter('sale_type', OpenApiTypes.STR, description='Тип угоди (sale/rent)'),
         OpenApiParameter('min_area', OpenApiTypes.NUMBER, description='Мінімальна площа'),
         OpenApiParameter('max_area', OpenApiTypes.NUMBER, description='Максимальна площа'),
+        OpenApiParameter('mine', OpenApiTypes.BOOL, description='Тільки мої оголошення (для авторизованих)'),
     ]
 )
 class PropertyListView(generics.ListAPIView):
@@ -94,8 +95,39 @@ class PropertyListView(generics.ListAPIView):
         metro = self.request.query_params.get('metro')
         if metro:
             queryset = queryset.filter(location__metro_station__icontains=metro)
+
+        # Тільки мої оголошення
+        mine = self.request.query_params.get('mine')
+        if mine and mine.lower() in ('1', 'true', 'yes'):
+            if self.request.user.is_authenticated:
+                queryset = queryset.filter(owner=self.request.user)
+            else:
+                queryset = queryset.none()
         
         return queryset
+
+
+@extend_schema(
+    tags=['Properties'],
+    summary='Мої оголошення',
+    description='Отримати список оголошень, створених поточним користувачем'
+)
+class MyPropertyListView(generics.ListAPIView):
+    """
+    GET /api/properties/my/
+
+    Повертає тільки оголошення поточного користувача
+    """
+    serializer_class = PropertyListSerializer
+    permission_classes = [IsAuthenticated]
+    filter_backends = [DjangoFilterBackend, filters.OrderingFilter]
+    ordering_fields = ['price', 'created_at', 'total_area']
+    ordering = ['-created_at']
+
+    def get_queryset(self):
+        return Property.objects.select_related('location').prefetch_related('photos').filter(
+            owner=self.request.user
+        )
 
 
 @extend_schema(
@@ -148,7 +180,7 @@ class PropertyCreateView(generics.CreateAPIView):
 
     def perform_create(self, serializer):
         # Зберігаємо оголошення
-        property_obj = serializer.save()
+        property_obj = serializer.save(owner=self.request.user)
         
         # Автоматично генеруємо embedding для RAG пошуку
         try:
@@ -209,6 +241,12 @@ class PropertyUpdateView(generics.UpdateAPIView):
     permission_classes = [IsAuthenticated]
     lookup_field = 'id'
     lookup_url_kwarg = 'property_id'
+
+    def get_queryset(self):
+        queryset = Property.objects.all()
+        if self.request.user.is_staff:
+            return queryset
+        return queryset.filter(owner=self.request.user)
     
     def perform_update(self, serializer):
         # Оновлюємо оголошення
@@ -271,6 +309,12 @@ class PropertyDeleteView(generics.DestroyAPIView):
     permission_classes = [IsAuthenticated]
     lookup_field = 'id'
     lookup_url_kwarg = 'property_id'
+
+    def get_queryset(self):
+        queryset = Property.objects.all()
+        if self.request.user.is_staff:
+            return queryset
+        return queryset.filter(owner=self.request.user)
 
 
 class PropertyLocationView(APIView):
