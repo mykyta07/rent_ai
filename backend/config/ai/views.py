@@ -6,6 +6,7 @@ from rest_framework.permissions import IsAuthenticated
 from .serializers import (
     ChatRequestSerializer,
     ChatResponseSerializer,
+    ChatHistoryMessageSerializer,
     SemanticSearchRequestSerializer,
     SemanticSearchResponseSerializer,
     ExplainRequestSerializer,
@@ -67,6 +68,42 @@ class ChatAssistantView(APIView):
                 {'error': f'Помилка при обробці запиту: {str(e)}'},
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR
             )
+
+
+class ChatHistoryView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    """
+    GET /api/ai/chat/history/?limit=50
+
+    Повертає останні повідомлення поточного користувача.
+    За замовчуванням повертає 50, максимум 200.
+    """
+
+    def get(self, request):
+        raw_limit = request.query_params.get('limit', 50)
+        try:
+            limit = max(1, min(int(raw_limit), 200))
+        except (TypeError, ValueError):
+            return Response(
+                {'error': 'Параметр limit має бути числом від 1 до 200'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        messages = ChatMessage.objects.filter(
+            user=request.user
+        ).order_by('-created_at')[:limit]
+
+        # Повертаємо від старих до нових для зручного рендеру в UI
+        serializer = ChatHistoryMessageSerializer(messages[::-1], many=True)
+        return Response(
+            {
+                'count': len(serializer.data),
+                'limit': limit,
+                'results': serializer.data
+            },
+            status=status.HTTP_200_OK
+        )
 
 
 class SemanticSearchView(APIView):

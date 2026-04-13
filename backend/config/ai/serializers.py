@@ -9,6 +9,13 @@ class ChatMessageSerializer(serializers.ModelSerializer):
         read_only_fields = ['id', 'created_at']
 
 
+class ChatHistoryMessageSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = ChatMessage
+        fields = ['id', 'role', 'content', 'created_at']
+        read_only_fields = ['id', 'role', 'content', 'created_at']
+
+
 class ChatRequestSerializer(serializers.Serializer):
     message = serializers.CharField()
 
