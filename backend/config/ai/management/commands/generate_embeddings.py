@@ -17,6 +17,11 @@ class Command(BaseCommand):
             help='Перегенерувати embeddings навіть якщо вони вже існують'
         )
         parser.add_argument(
+            '--check-invalid',
+            action='store_true',
+            help='Видалити embeddings з невправильним розміром та обробити їх заново'
+        )
+        parser.add_argument(
             '--limit',
             type=int,
             default=None,
@@ -25,12 +30,33 @@ class Command(BaseCommand):
 
     def handle(self, *args, **options):
         force = options['force']
+        check_invalid = options['check_invalid']
         limit = options['limit']
         
         self.stdout.write(self.style.NOTICE('🚀 Початок генерації embeddings...'))
         
         # Ініціалізуємо Gemini сервіс
         gemini = GeminiService()
+        
+        # Перевіряємо на невалідні embeddings
+        if check_invalid:
+            self.stdout.write(self.style.WARNING('🔍 Перевіряю embeddings на валідність розміру...'))
+            test_embedding = gemini.generate_embedding("тест")
+            expected_size = len(test_embedding)
+            
+            invalid_embeddings = PropertyEmbedding.objects.all()
+            deleted_count = 0
+            
+            for emb in invalid_embeddings:
+                if len(emb.embedding) != expected_size:
+                    self.stdout.write(f'   ✗ Видаляю невалідний embedding ID:{emb.property.id} (розмір: {len(emb.embedding)})')
+                    emb.delete()
+                    deleted_count += 1
+            
+            if deleted_count > 0:
+                self.stdout.write(self.style.SUCCESS(f'✓ Видалено {deleted_count} невалідних embeddings\n'))
+            else:
+                self.stdout.write(self.style.SUCCESS('✓ Всі embeddings мають правильний розмір\n'))
         
         # Визначаємо які об'єкти обробляти
         if force:

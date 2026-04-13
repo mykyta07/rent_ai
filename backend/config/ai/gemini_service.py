@@ -147,13 +147,28 @@ class GeminiService:
         
         # Обчислюємо косинусну схожість
         results = []
+        query_embedding_len = len(query_embedding)
+        
         for prop_emb in property_embeddings:
             doc_embedding = prop_emb.embedding
-            similarity = self._cosine_similarity(query_embedding, doc_embedding)
-            results.append({
-                'property': prop_emb.property,
-                'similarity_score': similarity
-            })
+            
+            # Перевіряємо сумісність розмірів embeddings
+            if len(doc_embedding) != query_embedding_len:
+                # Пропускаємо embeddings з несумісними розмірами
+                # (це може трапитися при переходу на новий embedding model)
+                print(f"⚠️  Пропуск ID:{prop_emb.property.id} - "
+                      f"несумісний розмір embedding ({len(doc_embedding)} vs {query_embedding_len})")
+                continue
+            
+            try:
+                similarity = self._cosine_similarity(query_embedding, doc_embedding)
+                results.append({
+                    'property': prop_emb.property,
+                    'similarity_score': similarity
+                })
+            except Exception as e:
+                print(f"⚠️  Помилка при обчисленні подібності для ID:{prop_emb.property.id}: {e}")
+                continue
         
         # Сортуємо за схожістю
         results.sort(key=lambda x: x['similarity_score'], reverse=True)
