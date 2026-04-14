@@ -8,6 +8,11 @@ from decimal import Decimal, InvalidOperation
 from django.core.management.base import BaseCommand
 from django.conf import settings
 from bs4 import BeautifulSoup
+from properties.domria_realty_type import (
+    collect_domria_listing_urls,
+    extract_label_wrap_v_texts,
+    infer_realty_type,
+)
 from properties.models import Property, Location, PropertyPhoto
 
 
@@ -167,12 +172,24 @@ class Command(BaseCommand):
                 
                 # Extract characteristics
                 chars = self.extract_characteristics(item)
-                
-                # Extract description
-                description = self.extract_description(item, realty_id)
-                
+
+                # Опис (у шапку додаємо canonical URL — fix_realty_types зчитає slug)
+                description = self.extract_description(item, realty_id, listing_url=url)
+
                 # Extract photos
                 photos = self.extract_photos(item)
+
+                listing_urls = collect_domria_listing_urls(item)
+                extra_urls = [h for h in listing_urls if h != url]
+                badge_texts = extract_label_wrap_v_texts(item)
+                realty_type = infer_realty_type(
+                    url=url,
+                    title=title,
+                    description=description,
+                    card_text="",
+                    extra_urls=extra_urls,
+                    badge_texts=badge_texts,
+                )
                 
                 # Create Property
                 property_obj = Property.objects.create(
@@ -184,7 +201,7 @@ class Command(BaseCommand):
                     total_area=chars.get('total_area'),
                     floor=chars.get('floor'),
                     floors_count=chars.get('floors_count'),
-                    realty_type='apartment',  # Default to apartment
+                    realty_type=realty_type,
                     sale_type=sale_type  # Визначено з URL
                 )
                 
@@ -321,14 +338,17 @@ class Command(BaseCommand):
         
         return result
 
-    def extract_description(self, item, realty_id):
-        """Extract full description text"""
-        desc_div = item.find('div', class_='desc-hidden')
+    def extract_description(self, item, realty_id, listing_url=""):
+        """Текст опису + службові рядки (ID і URL для типу нерухомості при наступних правках)."""
+        desc_div = item.find("div", class_="desc-hidden")
+        head = f"DOM.RIA ID: {realty_id}\n"
+        if listing_url:
+            head += f"URL: {listing_url}\n"
+        head += "\n"
         if desc_div:
             desc_text = desc_div.get_text(strip=True)
-            # Add ID marker for duplicate detection
-            return f"DOM.RIA ID: {realty_id}\n\n{desc_text}"
-        return f"DOM.RIA ID: {realty_id}"
+            return f"{head}{desc_text}"
+        return head.rstrip()
 
     def extract_photos(self, item):
         """Extract photo URLs"""

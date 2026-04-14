@@ -7,7 +7,9 @@ from .views import (
     PropertyUpdateView,
     PropertyDeleteView,
     PropertyPhotosView,
-    PropertyLocationView
+    PropertyLocationView,
+    FavoriteListCreateView,
+    FavoriteRemoveView,
 )
 
 urlpatterns = [
@@ -15,6 +17,12 @@ urlpatterns = [
     path('', PropertyListView.as_view(), name='property-list'),
     path('my/', MyPropertyListView.as_view(), name='property-my-list'),
     path('create/', PropertyCreateView.as_view(), name='property-create'),
+    path('favorites/', FavoriteListCreateView.as_view(), name='property-favorites'),
+    path(
+        'favorites/<int:property_id>/',
+        FavoriteRemoveView.as_view(),
+        name='property-favorite-remove',
+    ),
     
     # Деталі, оновлення, видалення
     path('<int:property_id>/', PropertyDetailView.as_view(), name='property-detail'),

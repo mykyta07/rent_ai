@@ -102,3 +102,31 @@ class PropertyPhoto(models.Model):
 
     def __str__(self):
         return self.url
+
+
+class Favorite(models.Model):
+    """Обрані оголошення користувача (серверне збереження)."""
+
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name="property_favorites",
+    )
+    property = models.ForeignKey(
+        Property,
+        on_delete=models.CASCADE,
+        related_name="favorited_by",
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["-created_at"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["user", "property"],
+                name="uniq_favorite_user_property",
+            )
+        ]
+
+    def __str__(self):
+        return f"{self.user_id} → {self.property_id}"

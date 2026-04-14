@@ -4,11 +4,11 @@ from rest_framework.response import Response
 from rest_framework import status
 from rest_framework.permissions import IsAuthenticated, IsAuthenticatedOrReadOnly
 from django_filters.rest_framework import DjangoFilterBackend
-from django.db.models import Q
+from django.db.models import Q, Case, When, IntegerField
 from drf_spectacular.utils import extend_schema, OpenApiParameter
 from drf_spectacular.types import OpenApiTypes
 
-from .models import Property, PropertyPhoto, Location
+from .models import Property, PropertyPhoto, Location, Favorite
 from .serializers import (
     PropertyListSerializer, 
     PropertyDetailSerializer,
@@ -340,3 +340,81 @@ class PropertyLocationView(APIView):
                 {'error': 'Локація не знайдена'},
                 status=status.HTTP_404_NOT_FOUND
             )
+
+
+@extend_schema(
+    tags=['Properties'],
+    summary='Обрані оголошення',
+    description='GET — список обраних (як картки каталогу). POST — додати в обране: {"property_id": 1}',
+)
+class FavoriteListCreateView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        fav_ids = list(
+            Favorite.objects.filter(user=request.user)
+            .order_by('-created_at')
+            .values_list('property_id', flat=True)
+        )
+        if not fav_ids:
+            return Response([])
+        preserved = Case(
+            *[When(id=pk, then=pos) for pos, pk in enumerate(fav_ids)],
+            output_field=IntegerField(),
+        )
+        qs = (
+            Property.objects.filter(id__in=fav_ids)
+            .select_related('location')
+            .prefetch_related('photos')
+            .order_by(preserved)
+        )
+        serializer = PropertyListSerializer(qs, many=True, context={'request': request})
+        return Response(serializer.data)
+
+    def post(self, request):
+        raw = request.data.get('property_id')
+        if raw is None:
+            return Response(
+                {'property_id': ['Обов\'язкове поле']},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        try:
+            property_id = int(raw)
+        except (TypeError, ValueError):
+            return Response(
+                {'property_id': ['Має бути числом']},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        if not Property.objects.filter(id=property_id).exists():
+            return Response(
+                {'error': 'Оголошення не знайдено'},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+        _, created = Favorite.objects.get_or_create(
+            user=request.user,
+            property_id=property_id,
+        )
+        return Response(
+            {'property_id': property_id, 'created': created},
+            status=status.HTTP_201_CREATED if created else status.HTTP_200_OK,
+        )
+
+
+@extend_schema(
+    tags=['Properties'],
+    summary='Прибрати з обраного',
+    description='DELETE — видалити оголошення з обраного поточного користувача',
+)
+class FavoriteRemoveView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def delete(self, request, property_id):
+        deleted, _ = Favorite.objects.filter(
+            user=request.user, property_id=property_id
+        ).delete()
+        if deleted == 0:
+            return Response(
+                {'error': 'Не в обраному'},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+        return Response(status=status.HTTP_204_NO_CONTENT)

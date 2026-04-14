@@ -200,7 +200,84 @@ class GeminiService:
         
         response = self.model.generate_content(prompt)
         return response.text
-    
+
+    def generate_listing_description(self, context: dict) -> str:
+        """
+        Генерує текст оголошення українською за заповненими полями форми (без звернення до БД).
+        """
+        rt = context.get("realty_type") or "apartment"
+        type_ua = {"apartment": "квартира", "house": "будинок", "commercial": "комерційна нерухомість"}.get(
+            rt, "квартира"
+        )
+        deal = "оренда" if context.get("sale_type") == "rent" else "продаж"
+        parts = [
+            f"Тип об'єкта: {type_ua}",
+            f"Тип угоди: {deal}",
+        ]
+        if (context.get("title") or "").strip():
+            parts.append(f"Заголовок (орієнтир): {context['title'].strip()}")
+        loc_bits = []
+        for key, label in (
+            ("city", "Місто"),
+            ("district", "Район"),
+            ("street", "Вулиця"),
+            ("building_number", "Номер будинку"),
+            ("metro_station", "Метро"),
+        ):
+            v = context.get(key)
+            if v is not None and str(v).strip():
+                loc_bits.append(f"{label}: {str(v).strip()}")
+        if context.get("metro_distance_minutes") is not None:
+            loc_bits.append(f"До метро: {context['metro_distance_minutes']} хв.")
+        if loc_bits:
+            parts.append("Локація: " + "; ".join(loc_bits))
+
+        price = context.get("price")
+        cur = (context.get("currency") or "$").strip() or "$"
+        if price is not None and price > 0:
+            parts.append(f"Ціна: {price} {cur}")
+        else:
+            parts.append("Ціна: не вказана або договірна")
+
+        for key, label in (
+            ("rooms_count", "Кімнат"),
+            ("total_area", "Загальна площа, м²"),
+            ("living_area", "Житлова площа, м²"),
+            ("kitchen_area", "Кухня, м²"),
+            ("floor", "Поверх"),
+            ("floors_count", "Поверховість будинку"),
+        ):
+            v = context.get(key)
+            if v is not None:
+                parts.append(f"{label}: {v}")
+        if (context.get("building_type") or "").strip():
+            parts.append(f"Тип будинку / конструкція: {context['building_type'].strip()}")
+        if context.get("is_commercial"):
+            parts.append("Комерційне призначення: так")
+        hints = (context.get("hints") or "").strip()
+        if hints:
+            parts.append(f"Додаткові побажання автора оголошення: {hints}")
+
+        facts = "\n".join(parts)
+        prompt = f"""
+Ти копірайтер оголошень нерухомості в Україні. За наведеними нижче ФАКТАМИ (без вигадування нових цифр і адрес)
+напиши привабливий опис українською для сайту оголошень.
+
+ФАКТИ:
+{facts}
+
+ВИМОГИ:
+- 2–5 абзаців звичайного тексту (без Markdown-заголовків ##, без HTML, без списку «ID:»).
+- Не додавай номер телефону, посилання на месенджери, вигадані документи чи юридичні гарантії.
+- Якщо якихось даних немає у ФАКТАХ — не вигадуй їх; можна загально згадати переваги типу житла.
+- Стиль: доброзичливо, професійно, для потенційного покупця чи орендаря.
+"""
+        response = self.model.generate_content(prompt)
+        text = (response.text or "").strip()
+        if not text:
+            raise ValueError("Модель повернула порожній текст")
+        return text
+
     def compare_properties(self, property_ids):
         """
         Порівнює 2-3 об'єкти і повертає текстове резюме

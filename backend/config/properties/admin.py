@@ -1,5 +1,5 @@
 from django.contrib import admin
-from .models import Property, Location, PropertyPhoto
+from .models import Property, Location, PropertyPhoto, Favorite
 
 
 class PropertyPhotoInline(admin.TabularInline):
@@ -30,3 +30,10 @@ class LocationAdmin(admin.ModelAdmin):
 class PropertyPhotoAdmin(admin.ModelAdmin):
     list_display = ['property', 'url', 'is_main']
     list_filter = ['is_main']
+
+
+@admin.register(Favorite)
+class FavoriteAdmin(admin.ModelAdmin):
+    list_display = ['user', 'property', 'created_at']
+    list_filter = ['created_at']
+    search_fields = ['user__username', 'property__title']

@@ -10,7 +10,8 @@ from .serializers import (
     SemanticSearchRequestSerializer,
     SemanticSearchResponseSerializer,
     ExplainRequestSerializer,
-    CompareRequestSerializer
+    CompareRequestSerializer,
+    ListingDescriptionGenerateSerializer,
 )
 from .models import ChatMessage
 from .gemini_service import GeminiService
@@ -198,6 +199,42 @@ class ExplainPropertyView(APIView):
             return Response(
                 {'error': f'Помилка при поясненні: {str(e)}'},
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
+
+
+class GenerateListingDescriptionView(APIView):
+    """
+    POST /api/ai/generate-listing-description/
+
+    Тіло: поля з форми оголошення (title, city, price, realty_type, …).
+    Відповідь: { "description": "..." }
+    """
+
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request):
+        serializer = ListingDescriptionGenerateSerializer(data=request.data)
+        if not serializer.is_valid():
+            return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+        data = serializer.validated_data
+        title = (data.get("title") or "").strip()
+        city = (data.get("city") or "").strip()
+        hints = (data.get("hints") or "").strip()
+        if not title and not city and not hints:
+            return Response(
+                {
+                    "error": "Вкажіть хоча б місто, заголовок або поле «підказка», щоб згенерувати опис.",
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        gemini_service = GeminiService()
+        try:
+            description = gemini_service.generate_listing_description(data)
+            return Response({"description": description}, status=status.HTTP_200_OK)
+        except Exception as e:
+            return Response(
+                {"error": str(e)},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR,
             )
 
 
