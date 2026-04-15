@@ -4,6 +4,7 @@ from properties.models import Property
 from ai.models import PropertyEmbedding, ChatMessage
 import numpy as np
 import json
+import re
 
 
 class GeminiService:
@@ -32,10 +33,6 @@ class GeminiService:
                 for prop in properties
             ]
         
-        # КРОК 2: AUGMENTED - Форматуємо контекст з найрелевантнішими об'єктами
-        # =======================================================================
-        properties_context = self._format_rag_context(relevant_results)
-        
         # Історія розмови (останні 5 повідомлень)
         history_text = ""
         if conversation_history:
@@ -47,20 +44,40 @@ class GeminiService:
         # Загальна статистика БД
         total_properties = Property.objects.count()
         
-        # КРОК 3: GENERATION - Gemini генерує відповідь з контекстом
-        # ===========================================================
-        prompt = f"""
-Ти - AI асистент з нерухомості. Твоя задача - допомагати користувачам знаходити підходящу нерухомість.
+        specific_question = self._is_specific_property_question(user_message)
+        focus_entries = (
+            self._build_focus_entries(user_message, relevant_results)
+            if specific_question
+            else None
+        )
+        chat_mode = "focus" if (specific_question and focus_entries) else "search"
 
-ІСТОРІЯ РОЗМОВИ:
-{history_text}
-
-ПОВІДОМЛЕННЯ КОРИСТУВАЧА:
-{user_message}
-
-НАЙБІЛЬШ РЕЛЕВАНТНІ ОБ'ЄКТИ (топ-10 з {total_properties} в базі):
-{properties_context}
-
+        # КРОК 2: AUGMENTED — контекст: один об'єкт (повні дані) або топ-10 RAG
+        if chat_mode == "focus":
+            properties_context = self._format_focus_property_context(focus_entries)
+            recommendation_policy = (
+                "РЕЖИМ ОДНОГО ОБ'ЄКТА (або явно названих у блоці контексту). "
+                "Відповідай лише про ці оголошення. Не згадуй інші ID, не пропонуй альтернативи й "
+                "не закінчуй фразами на кшталт «ось ще варіанти». Якщо чогось немає в даних — скажи, що в базі цього немає."
+            )
+            instructions_block = """
+ІНСТРУКЦІЇ:
+1. Відповідай українською, по суті запиту користувача.
+2. Спирайся лише на факти з блоку контексту вище; не вигадуй нові об'єкти, ціни чи адреси.
+3. Якщо в запиті фігурує оренда чи продаж — коротко узгодь формулювання з полем «Тип угоди» в даних.
+4. Можна один раз зазначити ID у форматі «ID: X», якщо це допомагає користувачу.
+5. Формат відповіді: простий текст без Markdown (#, **, *, ```), без зайвих службових символів.
+"""
+            context_header = (
+                f"ДАНІ ПРО ОБ'ЄКТ(И) ДЛЯ ВІДПОВІДІ (повний опис з бази; не показуй користувачу службові пояснення, лише зміст):"
+            )
+        else:
+            properties_context = self._format_rag_context(relevant_results)
+            recommendation_policy = (
+                "Користувач у режимі пошуку варіантів. "
+                "Доречно запропонувати 2-5 релевантних об'єктів і запросити уточнення критеріїв."
+            )
+            instructions_block = f"""
 ІНСТРУКЦІЇ:
 1. Проаналізуй запит користувача
 2. Визнач чи користувач шукає ОРЕНДУ чи ПРОДАЖ (ключові слова: орендувати, знімати, здати, rent - це оренда; купити, придбати, продаж, buy - це продаж)
@@ -74,6 +91,7 @@ class GeminiService:
 5. Поясни чому саме ці об'єкти підходять
 6. Будь дружнім та професійним
 7. Відповідай українською мовою
+8. Формат відповіді: простий текст без Markdown (#, **, *, ```), без зайвих службових символів
 
 ВАЖЛИВО: 
 - У тебе є доступ ТІЛЬКИ до цих 10 об'єктів (вони найрелевантніші з усієї бази)
@@ -84,8 +102,31 @@ class GeminiService:
 - Оренда зазвичай в гривнях (грн), продаж - в доларах ($)
 - Скор релевантності показує наскільки об'єкт відповідає запиту (0-100%)
 """
+            context_header = (
+                f"НАЙБІЛЬШ РЕЛЕВАНТНІ ОБ'ЄКТИ (топ-10 з {total_properties} в базі):"
+            )
+
+        # КРОК 3: GENERATION - Gemini генерує відповідь з контекстом
+        # ===========================================================
+        prompt = f"""
+Ти - AI асистент з нерухомості. Твоя задача - допомагати користувачам знаходити підходящу нерухомість.
+
+ІСТОРІЯ РОЗМОВИ:
+{history_text}
+
+ПОВІДОМЛЕННЯ КОРИСТУВАЧА:
+{user_message}
+
+{context_header}
+{properties_context}
+{instructions_block}
+
+ПОЛІТИКА ВІДПОВІДІ ДЛЯ ЦЬОГО ЗАПИТУ:
+{recommendation_policy}
+"""
         
         response = self.model.generate_content(prompt)
+        assistant_text = self._clean_llm_text(response.text)
         
         # Зберігаємо повідомлення в БД
         ChatMessage.objects.create(
@@ -96,20 +137,228 @@ class GeminiService:
         ChatMessage.objects.create(
             user_id=user_id,
             role='assistant',
-            content=response.text
+            content=assistant_text
         )
         
-        # Аналізуємо відповідь для виявлення згаданих ID
-        properties_list = [r['property'] for r in relevant_results]
-        mentioned_property_ids = self._extract_property_ids(response.text, properties_list)
+        # Аналізуємо відповідь для виявлення згаданих ID (у фокус-режимі — лише дозволені)
+        effective = focus_entries if chat_mode == "focus" else relevant_results
+        properties_list = [r['property'] for r in effective]
+        allowed_ids = {p.id for p in properties_list}
+        mentioned_property_ids = [
+            i for i in self._extract_property_ids(assistant_text, properties_list)
+            if i in allowed_ids
+        ]
         
         return {
-            'assistant_message': response.text,
+            'assistant_message': assistant_text,
             'properties': mentioned_property_ids,
             'total_in_db': total_properties,
             'searched_count': len(relevant_results),
             'relevance_scores': [r['similarity_score'] for r in relevant_results[:5]]
         }
+
+    def _is_specific_property_question(self, user_message):
+        """
+        Евристика: відрізняє конкретне питання від запиту «підбери варіанти».
+        True -> не нав'язуємо додаткові пропозиції.
+        """
+        text = (user_message or "").strip().lower()
+        if not text:
+            return False
+
+        if self._extract_explicit_property_ids_from_user(user_message):
+            return True
+
+        # Явний пошуковий намір
+        discovery_markers = [
+            "підбери",
+            "підберіть",
+            "знайди",
+            "знайдіть",
+            "покажи варіанти",
+            "які є варіанти",
+            "що є",
+            "порадь",
+            "recommend",
+            "show me",
+            "find me",
+            "схожі",
+            "альтернатив",
+            "інші варіанти",
+            "ще якісь",
+            "підбір",
+        ]
+        if any(m in text for m in discovery_markers):
+            return False
+
+        # Точкове питання / деталі про обране оголошення
+        tangible = [
+            "цей об",
+            "ця квартира",
+            "цю квартиру",
+            "цей будинок",
+            "цей варіант",
+            "цього варіанту",
+            "про цей",
+            "про цю",
+            "це оголошення",
+            "детальніше",
+            "детальніш",
+            "розкажи",
+            "розпові",
+            "більше про",
+            "ще про",
+        ]
+        if any(m in text for m in tangible):
+            return True
+
+        # Точкове питання/аналіз
+        specific_markers = [
+            "конкретно",
+            "чи варто",
+            "поясни",
+            "пояснення",
+            "які мінуси",
+            "які ризики",
+            "оцін",
+            "порівняй",
+            "чому",
+            "наскільки",
+            "what about",
+        ]
+        if any(m in text for m in specific_markers):
+            return True
+
+        return False
+
+    def _extract_explicit_property_ids_from_user(self, user_message):
+        """ID з тексту користувача: «ID: 178», «ід 178», «#178», «№ 178»."""
+        text = user_message or ""
+        ids = set()
+        for m in re.finditer(r"(?i)(?:\bID\b|\bід\b)\s*[:#]?\s*(\d+)", text):
+            ids.add(int(m.group(1)))
+        for m in re.finditer(r"(?:^|[\s,;])(?:#|№)\s*(\d+)(?=[\s,;.]|$)", text):
+            ids.add(int(m.group(1)))
+        return sorted(ids)
+
+    def _normalize_addr_tokens(self, s):
+        s = (s or "").lower()
+        s = re.sub(r"[^\w\u0400-\u04FF]+", " ", s)
+        return [t for t in s.split() if len(t) > 2]
+
+    def _match_focus_from_user_paste(self, user_message, relevant_results):
+        """Зіставити вулицю / демонстратив «цей варіант» з топом RAG."""
+        if not user_message or not relevant_results:
+            return None
+        text_lower = user_message.lower()
+        demonstrative = (
+            "цей варіант", "цього варіанту", "цю квартиру", "цю нерухомість",
+            "цей об'єкт", "цього об'єкта", "про цей", "про цю", "це оголошення",
+        )
+        street_m = re.search(
+            r"(?i)(вул\.?\s*[^,\n]+|вулиця\s+[^,\n]+|просп\.?\s*[^,\n]+|проспект\s+[^,\n]+)",
+            user_message,
+        )
+        user_tokens = self._normalize_addr_tokens(user_message)
+        best = None
+        best_score = 0
+        for r in relevant_results:
+            p = r["property"]
+            loc = p.location if hasattr(p, "location") else None
+            hay_list = self._normalize_addr_tokens(
+                f"{p.title} {getattr(loc, 'street', '') or ''} {getattr(loc, 'city', '') or ''}"
+            )
+            hay_set = set(hay_list)
+            score = 0
+            if street_m:
+                frag_tokens = self._normalize_addr_tokens(street_m.group(0))
+                score += sum(2 for t in frag_tokens if t in hay_set)
+            if any(d in text_lower for d in demonstrative):
+                score += sum(1 for t in user_tokens if t in hay_set)
+            if score > best_score:
+                best_score = score
+                best = r
+        if best and best_score >= 2:
+            return best
+        return None
+
+    def _build_focus_entries(self, user_message, relevant_results):
+        """
+        Список записів як у semantic_search для режиму «один об'єкт».
+        """
+        explicit_ids = self._extract_explicit_property_ids_from_user(user_message)
+        if explicit_ids:
+            out = []
+            by_id = {r["property"].id: r for r in relevant_results}
+            for pid in explicit_ids:
+                if pid in by_id:
+                    out.append(by_id[pid])
+                else:
+                    try:
+                        p = Property.objects.select_related("location").get(pk=pid)
+                        out.append({"property": p, "similarity_score": 0.0})
+                    except Property.DoesNotExist:
+                        pass
+            return out or None
+
+        match = self._match_focus_from_user_paste(user_message, relevant_results)
+        if match:
+            return [match]
+        if relevant_results:
+            return [relevant_results[0]]
+        return None
+
+    def _format_focus_property_context(self, focus_entries):
+        """Повний опис обраних об'єктів (без обрізання description)."""
+        if len(focus_entries) == 1:
+            p = focus_entries[0]["property"]
+            return (
+                f"ОБ'ЄКТ ID {p.id}. Використовуй лише ці дані:\n"
+                + self._format_single_property(p)
+            )
+        blocks = []
+        for e in focus_entries:
+            p = e["property"]
+            blocks.append(f"--- ID: {p.id} ---\n" + self._format_single_property(p))
+        return "ОБ'ЄКТИ (лише вони):\n\n" + "\n\n".join(blocks)
+
+    def _clean_llm_text(self, text):
+        """
+        Нормалізує текст відповіді моделі для UI чату:
+        - прибирає markdown-обгортки і зайві символи;
+        - уніфікує списки;
+        - чистить надлишкові порожні рядки.
+        """
+        if not text:
+            return ""
+        cleaned = str(text).replace("\r\n", "\n").replace("\r", "\n")
+        cleaned = cleaned.replace("```", "")
+        cleaned = cleaned.replace("**", "").replace("__", "").replace("`", "")
+        lines = []
+        for raw in cleaned.split("\n"):
+            line = raw.strip()
+            if not line:
+                lines.append("")
+                continue
+            # Забираємо markdown-заголовки
+            while line.startswith("#"):
+                line = line[1:].lstrip()
+            # Уніфікуємо маркери списку
+            if line.startswith("- ") or line.startswith("* "):
+                line = f"• {line[2:].strip()}"
+            lines.append(line)
+        # Прибираємо надлишок порожніх рядків
+        out = []
+        empty_streak = 0
+        for line in lines:
+            if line == "":
+                empty_streak += 1
+                if empty_streak <= 1:
+                    out.append(line)
+            else:
+                empty_streak = 0
+                out.append(line)
+        return "\n".join(out).strip()
     
     def generate_embedding(self, text):
         """
@@ -198,6 +447,32 @@ class GeminiService:
 Надай детальне пояснення переваг та недоліків об'єкта. Відповідай українською мовою.
 """
         
+        response = self.model.generate_content(prompt)
+        return response.text
+
+    def explain_property_brief(self, property_id):
+        """
+        Короткий аналіз об'єкта (2-3 речення) для відображення в сайдбарі сторінки.
+        """
+        try:
+            property_obj = Property.objects.select_related('location').get(id=property_id)
+        except Property.DoesNotExist:
+            return "Об'єкт не знайдено"
+
+        property_info = self._format_single_property(property_obj)
+        prompt = f"""
+Ти - експерт з нерухомості. Зроби дуже короткий аналіз оголошення на 2-3 речення українською.
+
+ІНФОРМАЦІЯ ПРО ОБ'ЄКТ:
+{property_info}
+
+ВИМОГИ:
+- Пиши коротко та практично, без загальних фраз.
+- Обов'язково вкажи 1-2 ключові переваги.
+- Обов'язково вкажи 1 можливий нюанс/ризик.
+- Не використовуй марковані списки, тільки суцільний текст.
+- Максимум 420 символів.
+"""
         response = self.model.generate_content(prompt)
         return response.text
 

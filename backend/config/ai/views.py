@@ -10,6 +10,7 @@ from .serializers import (
     SemanticSearchRequestSerializer,
     SemanticSearchResponseSerializer,
     ExplainRequestSerializer,
+    ExplainBriefRequestSerializer,
     CompareRequestSerializer,
     ListingDescriptionGenerateSerializer,
 )
@@ -198,6 +199,39 @@ class ExplainPropertyView(APIView):
         except Exception as e:
             return Response(
                 {'error': f'Помилка при поясненні: {str(e)}'},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
+
+
+class ExplainPropertyBriefView(APIView):
+    permission_classes = [IsAuthenticated]
+    serializer_class = ExplainBriefRequestSerializer
+
+    """
+    POST /api/ai/explain/brief/
+
+    Повертає короткий аналіз об'єкта (2-3 речення) для картки на сторінці оголошення.
+    """
+
+    def post(self, request):
+        serializer = ExplainBriefRequestSerializer(data=request.data)
+        if not serializer.is_valid():
+            return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+        property_id = serializer.validated_data['property_id']
+        if not Property.objects.filter(id=property_id).exists():
+            return Response(
+                {'error': 'Об\'єкт не знайдено'},
+                status=status.HTTP_404_NOT_FOUND
+            )
+
+        gemini_service = GeminiService()
+        try:
+            explanation = gemini_service.explain_property_brief(property_id=property_id)
+            return Response({'explanation': explanation}, status=status.HTTP_200_OK)
+        except Exception as e:
+            return Response(
+                {'error': f'Помилка при короткому аналізі: {str(e)}'},
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR
             )
 

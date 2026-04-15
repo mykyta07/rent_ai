@@ -4,6 +4,7 @@ from .views import (
     ChatHistoryView,
     SemanticSearchView,
     ExplainPropertyView,
+    ExplainPropertyBriefView,
     ComparePropertiesView,
     GenerateListingDescriptionView,
 )
@@ -13,6 +14,7 @@ urlpatterns = [
     path('chat/history/', ChatHistoryView.as_view(), name='ai-chat-history'),
     path('search/', SemanticSearchView.as_view(), name='ai-semantic-search'),
     path('explain/', ExplainPropertyView.as_view(), name='ai-explain'),
+    path('explain/brief/', ExplainPropertyBriefView.as_view(), name='ai-explain-brief'),
     path('compare/', ComparePropertiesView.as_view(), name='ai-compare'),
     path(
         'generate-listing-description/',

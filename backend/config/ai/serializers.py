@@ -44,6 +44,10 @@ class ExplainRequestSerializer(serializers.Serializer):
     user_preferences = serializers.CharField(required=False)
 
 
+class ExplainBriefRequestSerializer(serializers.Serializer):
+    property_id = serializers.IntegerField()
+
+
 class CompareRequestSerializer(serializers.Serializer):
     property_ids = serializers.ListField(
         child=serializers.IntegerField(),
