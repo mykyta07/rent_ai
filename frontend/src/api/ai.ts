@@ -41,6 +41,17 @@ export async function explainProperty(
   })
 }
 
+export async function explainPropertyBrief(
+  propertyId: number
+): Promise<{ explanation: string }> {
+  return apiJson<{ explanation: string }>('/api/ai/explain/brief/', {
+    method: 'POST',
+    body: {
+      property_id: propertyId,
+    },
+  })
+}
+
 export async function compareProperties(
   propertyIds: number[]
 ): Promise<{ comparison: string }> {

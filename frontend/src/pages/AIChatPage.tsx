@@ -11,6 +11,23 @@ type Bubble = {
   properties?: number[]
 }
 
+function formatAssistantText(content: string): string {
+  const normalized = content.replace(/\r\n/g, '\n').replace(/\r/g, '\n')
+  const lines = normalized.split('\n').map((raw) => {
+    let line = raw.trim()
+    if (!line) return ''
+    line = line.replace(/`/g, '')
+    line = line.replace(/\*\*(.*?)\*\*/g, '$1')
+    line = line.replace(/__(.*?)__/g, '$1')
+    line = line.replace(/^#{1,6}\s*/, '')
+    if (line.startsWith('- ') || line.startsWith('* ')) {
+      line = `• ${line.slice(2).trim()}`
+    }
+    return line
+  })
+  return lines.join('\n').replace(/\n{3,}/g, '\n\n').trim()
+}
+
 export function AIChatPage() {
   const [messages, setMessages] = useState<Bubble[]>([])
   const [input, setInput] = useState('')
@@ -109,7 +126,9 @@ export function AIChatPage() {
                   : 'bg-slate-100 text-slate-800'
               }`}
             >
-              <p className="whitespace-pre-wrap">{msg.content}</p>
+              <p className="whitespace-pre-wrap">
+                {msg.role === 'assistant' ? formatAssistantText(msg.content) : msg.content}
+              </p>
               {msg.properties && msg.properties.length > 0 && (
                 <div className="mt-3 border-t border-slate-200/50 pt-3">
                   <p className="text-xs font-semibold opacity-80">Рекомендовані ID:</p>

@@ -28,7 +28,6 @@ type CatalogFilters = {
   max_price: string
   min_area: string
   max_area: string
-  metro: string
   type: string
   sale_type: string
   ordering: string
@@ -43,7 +42,6 @@ function useQueryFilters(searchParams: URLSearchParams): CatalogFilters {
       max_price: searchParams.get('max_price') ?? '',
       min_area: searchParams.get('min_area') ?? '',
       max_area: searchParams.get('max_area') ?? '',
-      metro: searchParams.get('metro') ?? '',
       type: searchParams.get('type') ?? '',
       sale_type: searchParams.get('sale_type') ?? '',
       ordering: searchParams.get('ordering') ?? '-created_at',
@@ -62,7 +60,6 @@ function filtersToFetchParams(f: CatalogFilters): Parameters<typeof fetchPropert
   if (f.max_price) params.max_price = f.max_price
   if (f.min_area) params.min_area = f.min_area
   if (f.max_area) params.max_area = f.max_area
-  if (f.metro) params.metro = f.metro
   if (f.type) params.type = f.type
   if (f.sale_type) params.sale_type = f.sale_type
   return params
@@ -97,7 +94,6 @@ function buildQueryFromFilters(f: CatalogFilters): string | null {
     parts.push(REALTY_UK[f.type] ?? f.type)
   }
   if (f.district.trim()) parts.push(`район / місто: ${f.district.trim()}`)
-  if (f.metro.trim()) parts.push(`метро: ${f.metro.trim()}`)
   if (f.rooms) parts.push(`${f.rooms} кімнат`)
   if (f.min_price || f.max_price) {
     parts.push(`ціна від ${f.min_price || '—'} до ${f.max_price || '—'}`)
@@ -225,7 +221,6 @@ export function PropertyListPage() {
       'max_price',
       'min_area',
       'max_area',
-      'metro',
       'type',
       'sale_type',
       'ordering',
@@ -360,15 +355,6 @@ export function PropertyListPage() {
                   defaultValue={filters.max_price}
                   type="number"
                   className="mt-1 w-full rounded-xl border border-slate-200 px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-brand/30"
-                />
-              </div>
-              <div>
-                <label className="text-xs font-medium text-slate-500">Метро</label>
-                <input
-                  name="metro"
-                  defaultValue={filters.metro}
-                  className="mt-1 w-full rounded-xl border border-slate-200 px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-brand/30"
-                  placeholder="Назва станції"
                 />
               </div>
               <div>

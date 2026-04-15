@@ -14,6 +14,7 @@ import {
   fetchPropertyLocation,
   fetchPropertyPhotos,
 } from '../api/properties'
+import { explainPropertyBrief } from '../api/ai'
 import type { PropertyDetail, PropertyPhoto, Location } from '../api/types'
 import { formatApiError, formatMoney, realtyTypeLabel, saleTypeLabel } from '../lib/format'
 import { useFavorites } from '../context/FavoritesContext'
@@ -33,6 +34,9 @@ export function PropertyDetailPage() {
   const [error, setError] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
   const [mainIdx, setMainIdx] = useState(0)
+  const [aiBrief, setAiBrief] = useState<string | null>(null)
+  const [aiBriefLoading, setAiBriefLoading] = useState(false)
+  const [aiBriefError, setAiBriefError] = useState<string | null>(null)
 
   useEffect(() => {
     if (!Number.isFinite(pid)) {
@@ -64,6 +68,31 @@ export function PropertyDetailPage() {
       cancelled = true
     }
   }, [pid])
+
+  useEffect(() => {
+    if (!Number.isFinite(pid) || !detail || !user) {
+      setAiBrief(null)
+      setAiBriefError(null)
+      setAiBriefLoading(false)
+      return
+    }
+    let cancelled = false
+    void (async () => {
+      setAiBriefLoading(true)
+      setAiBriefError(null)
+      try {
+        const res = await explainPropertyBrief(pid)
+        if (!cancelled) setAiBrief(res.explanation.trim())
+      } catch (e) {
+        if (!cancelled) setAiBriefError(formatApiError(e))
+      } finally {
+        if (!cancelled) setAiBriefLoading(false)
+      }
+    })()
+    return () => {
+      cancelled = true
+    }
+  }, [pid, detail, user])
 
   const onDelete = async () => {
     if (!detail || !window.confirm('Видалити оголошення назавжди?')) return
@@ -241,6 +270,26 @@ export function PropertyDetailPage() {
                 </>
               )}
             </div>
+          </div>
+
+          <div className="rounded-3xl border border-brand/15 bg-brand/5 p-6 shadow-sm">
+            <h2 className="inline-flex items-center gap-2 font-semibold text-slate-900">
+              <Sparkles className="h-4 w-4 text-brand" />
+              Короткий аналіз ШІ
+            </h2>
+            {!user ? (
+              <p className="mt-3 text-sm text-slate-600">
+                Увійдіть, щоб побачити короткий AI-аналіз цього оголошення.
+              </p>
+            ) : aiBriefLoading ? (
+              <p className="mt-3 text-sm text-slate-500">Готуємо аналіз…</p>
+            ) : aiBriefError ? (
+              <p className="mt-3 text-sm text-red-700">{aiBriefError}</p>
+            ) : (
+              <p className="mt-3 whitespace-pre-wrap text-sm leading-6 text-slate-700">
+                {aiBrief || 'Немає даних для аналізу.'}
+              </p>
+            )}
           </div>
 
           {location && (
