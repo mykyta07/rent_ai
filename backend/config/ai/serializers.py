@@ -1,19 +1,19 @@
 from rest_framework import serializers
-from .models import ChatMessage
+from .models import ChatMessage, PropertyExplainChatMessage
 
 
 class ChatMessageSerializer(serializers.ModelSerializer):
     class Meta:
         model = ChatMessage
-        fields = ['id', 'user', 'role', 'content', 'created_at']
+        fields = ['id', 'user', 'role', 'content', 'properties', 'created_at']
         read_only_fields = ['id', 'created_at']
 
 
 class ChatHistoryMessageSerializer(serializers.ModelSerializer):
     class Meta:
         model = ChatMessage
-        fields = ['id', 'role', 'content', 'created_at']
-        read_only_fields = ['id', 'role', 'content', 'created_at']
+        fields = ['id', 'role', 'content', 'properties', 'created_at']
+        read_only_fields = ['id', 'role', 'content', 'properties', 'created_at']
 
 
 class ChatRequestSerializer(serializers.Serializer):
@@ -26,6 +26,21 @@ class ChatResponseSerializer(serializers.Serializer):
         child=serializers.IntegerField(),
         required=False
     )
+
+
+class PropertyExplainChatRequestSerializer(serializers.Serializer):
+    message = serializers.CharField()
+
+
+class PropertyExplainChatResponseSerializer(serializers.Serializer):
+    assistant_message = serializers.CharField()
+
+
+class PropertyExplainChatHistoryMessageSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = PropertyExplainChatMessage
+        fields = ["id", "role", "content", "created_at"]
+        read_only_fields = ["id", "role", "content", "created_at"]
 
 
 class SemanticSearchRequestSerializer(serializers.Serializer):

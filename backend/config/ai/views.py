@@ -7,6 +7,9 @@ from .serializers import (
     ChatRequestSerializer,
     ChatResponseSerializer,
     ChatHistoryMessageSerializer,
+    PropertyExplainChatRequestSerializer,
+    PropertyExplainChatResponseSerializer,
+    PropertyExplainChatHistoryMessageSerializer,
     SemanticSearchRequestSerializer,
     SemanticSearchResponseSerializer,
     ExplainRequestSerializer,
@@ -14,7 +17,7 @@ from .serializers import (
     CompareRequestSerializer,
     ListingDescriptionGenerateSerializer,
 )
-from .models import ChatMessage
+from .models import ChatMessage, PropertyExplainChatMessage
 from .gemini_service import GeminiService
 from properties.models import Property
 
@@ -105,6 +108,78 @@ class ChatHistoryView(APIView):
                 'results': serializer.data
             },
             status=status.HTTP_200_OK
+        )
+
+
+class PropertyExplainChatView(APIView):
+    permission_classes = [IsAuthenticated]
+    serializer_class = PropertyExplainChatRequestSerializer
+
+    """
+    POST /api/ai/properties/<property_id>/explain/chat/
+
+    Чат «AI пояснення» для конкретного оголошення.
+    Історія окрема для кожного користувача і кожного property_id.
+    """
+
+    def post(self, request, property_id: int):
+        serializer = PropertyExplainChatRequestSerializer(data=request.data)
+        if not serializer.is_valid():
+            return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+        user = request.user
+        message = serializer.validated_data["message"]
+
+        if not Property.objects.filter(id=property_id).exists():
+            return Response({"error": "Об'єкт не знайдено"}, status=status.HTTP_404_NOT_FOUND)
+
+        history = (
+            PropertyExplainChatMessage.objects.filter(user=user, property_id=property_id)
+            .order_by("-created_at")[:20][::-1]
+        )
+
+        gemini_service = GeminiService()
+        try:
+            result = gemini_service.generate_property_explain_chat_response(
+                user_message=message,
+                user_id=user.id,
+                property_id=int(property_id),
+                conversation_history=history,
+            )
+            out = PropertyExplainChatResponseSerializer(result).data
+            return Response(out, status=status.HTTP_200_OK)
+        except Exception as e:
+            return Response(
+                {"error": f"Помилка при обробці запиту: {str(e)}"},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            )
+
+
+class PropertyExplainChatHistoryView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    """
+    GET /api/ai/properties/<property_id>/explain/chat/history/?limit=50
+    """
+
+    def get(self, request, property_id: int):
+        raw_limit = request.query_params.get("limit", 50)
+        try:
+            limit = max(1, min(int(raw_limit), 200))
+        except (TypeError, ValueError):
+            return Response(
+                {"error": "Параметр limit має бути числом від 1 до 200"},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        messages = (
+            PropertyExplainChatMessage.objects.filter(user=request.user, property_id=property_id)
+            .order_by("-created_at")[:limit]
+        )
+        serializer = PropertyExplainChatHistoryMessageSerializer(messages[::-1], many=True)
+        return Response(
+            {"count": len(serializer.data), "limit": limit, "results": serializer.data},
+            status=status.HTTP_200_OK,
         )
 
 

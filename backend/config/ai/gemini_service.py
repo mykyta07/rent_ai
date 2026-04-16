@@ -5,6 +5,7 @@ from ai.models import PropertyEmbedding, ChatMessage
 import numpy as np
 import json
 import re
+from ai.models import PropertyExplainChatMessage
 
 
 class GeminiService:
@@ -128,18 +129,6 @@ class GeminiService:
         response = self.model.generate_content(prompt)
         assistant_text = self._clean_llm_text(response.text)
         
-        # Зберігаємо повідомлення в БД
-        ChatMessage.objects.create(
-            user_id=user_id,
-            role='user',
-            content=user_message
-        )
-        ChatMessage.objects.create(
-            user_id=user_id,
-            role='assistant',
-            content=assistant_text
-        )
-        
         # Аналізуємо відповідь для виявлення згаданих ID (у фокус-режимі — лише дозволені)
         effective = focus_entries if chat_mode == "focus" else relevant_results
         properties_list = [r['property'] for r in effective]
@@ -148,6 +137,20 @@ class GeminiService:
             i for i in self._extract_property_ids(assistant_text, properties_list)
             if i in allowed_ids
         ]
+
+        # Зберігаємо повідомлення в БД (разом з рекомендованими ID для історії)
+        ChatMessage.objects.create(
+            user_id=user_id,
+            role='user',
+            content=user_message,
+            properties=[],
+        )
+        ChatMessage.objects.create(
+            user_id=user_id,
+            role='assistant',
+            content=assistant_text,
+            properties=mentioned_property_ids,
+        )
         
         return {
             'assistant_message': assistant_text,
@@ -156,6 +159,61 @@ class GeminiService:
             'searched_count': len(relevant_results),
             'relevance_scores': [r['similarity_score'] for r in relevant_results[:5]]
         }
+
+    def generate_property_explain_chat_response(
+        self, user_message, user_id, property_id, conversation_history=None
+    ):
+        """
+        Чат-пояснення для конкретного об'єкта.
+        Історія: PropertyExplainChatMessage (user + property).
+        """
+        if conversation_history is None:
+            conversation_history = []
+
+        prop = Property.objects.select_related("location").get(pk=property_id)
+
+        history_text = ""
+        if conversation_history:
+            history_text = "\n".join([f"{msg.role}: {msg.content}" for msg in conversation_history[-12:]])
+
+        property_context = self._format_single_property(prop)
+
+        prompt = f"""
+Ти - AI асистент з нерухомості. Користувач спілкується про ОДИН конкретний об'єкт.
+
+ОБ'ЄКТ (дані з бази):
+{property_context}
+
+ІСТОРІЯ ДІАЛОГУ:
+{history_text if history_text else "Немає попередньої історії"}
+
+ПОВІДОМЛЕННЯ КОРИСТУВАЧА:
+{user_message}
+
+ПРАВИЛА:
+- Відповідай лише про цей об'єкт (ID: {property_id}). НЕ пропонуй альтернативи і не згадуй інші ID.
+- Не вигадуй дані, яких немає в описі/полях об'єкта.
+- Якщо бракує даних для точної відповіді — скажи, що в базі цього немає, і уточни, що саме користувач хоче дізнатись (стан меблів, комунальні, тварини, застава тощо).
+- Формат: простий текст українською без Markdown (#, **, *, ```), без емодзі.
+"""
+
+        response = self.model.generate_content(prompt)
+        assistant_text = self._clean_llm_text(response.text)
+
+        PropertyExplainChatMessage.objects.create(
+            user_id=user_id,
+            property_id=property_id,
+            role="user",
+            content=user_message,
+        )
+        PropertyExplainChatMessage.objects.create(
+            user_id=user_id,
+            property_id=property_id,
+            role="assistant",
+            content=assistant_text,
+        )
+
+        return {"assistant_message": assistant_text}
 
     def _is_specific_property_question(self, user_message):
         """
