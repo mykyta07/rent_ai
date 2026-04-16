@@ -119,6 +119,7 @@ export type ChatHistoryMessage = {
   id: number
   role: 'user' | 'assistant'
   content: string
+  properties?: number[]
   created_at: string
 }
 
@@ -127,4 +128,15 @@ export type SemanticSearchResult = {
   title: string
   description: string
   similarity_score: number
+}
+
+export type PropertyExplainChatResponse = {
+  assistant_message: string
+}
+
+export type PropertyExplainChatHistoryMessage = {
+  id: number
+  role: 'user' | 'assistant'
+  content: string
+  created_at: string
 }

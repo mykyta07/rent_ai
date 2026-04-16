@@ -3,6 +3,8 @@ import type {
   ChatHistoryMessage,
   ChatResponse,
   ListingDescriptionGeneratePayload,
+  PropertyExplainChatHistoryMessage,
+  PropertyExplainChatResponse,
   SemanticSearchResult,
 } from './types'
 
@@ -50,6 +52,27 @@ export async function explainPropertyBrief(
       property_id: propertyId,
     },
   })
+}
+
+export async function sendPropertyExplainChatMessage(
+  propertyId: number,
+  message: string
+): Promise<PropertyExplainChatResponse> {
+  return apiJson<PropertyExplainChatResponse>(`/api/ai/properties/${propertyId}/explain/chat/`, {
+    method: 'POST',
+    body: { message },
+  })
+}
+
+export async function fetchPropertyExplainChatHistory(
+  propertyId: number,
+  limit = 50
+): Promise<{
+  count: number
+  limit: number
+  results: PropertyExplainChatHistoryMessage[]
+}> {
+  return apiJson(`/api/ai/properties/${propertyId}/explain/chat/history/?limit=${limit}`)
 }
 
 export async function compareProperties(

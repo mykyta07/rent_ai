@@ -6,6 +6,7 @@ import type { ChatHistoryMessage } from '../api/types'
 import { formatApiError } from '../lib/format'
 
 type Bubble = {
+  key: string
   role: 'user' | 'assistant'
   content: string
   properties?: number[]
@@ -43,8 +44,10 @@ export function AIChatPage() {
         if (cancelled) return
         setMessages(
           results.map((m: ChatHistoryMessage) => ({
+            key: `srv-${m.id}`,
             role: m.role,
             content: m.content,
+            properties: m.properties ?? [],
           }))
         )
       } catch {
@@ -66,16 +69,18 @@ export function AIChatPage() {
     if (!text || loading) return
     setInput('')
     setError(null)
-    setMessages((m) => [...m, { role: 'user', content: text }])
+    setMessages((m) => [...m, { key: `tmp-user-${Date.now()}-${Math.random()}`, role: 'user', content: text }])
     setLoading(true)
     try {
       const res = await sendChatMessage(text)
+      const props = (res.properties ?? []).filter((v) => Number.isFinite(v) && v > 0)
       setMessages((m) => [
         ...m,
         {
+          key: `tmp-asst-${Date.now()}-${Math.random()}`,
           role: 'assistant',
           content: res.assistant_message,
-          properties: res.properties,
+          properties: props,
         },
       ])
     } catch (err) {
@@ -83,6 +88,7 @@ export function AIChatPage() {
       setMessages((m) => [
         ...m,
         {
+          key: `tmp-asst-err-${Date.now()}-${Math.random()}`,
           role: 'assistant',
           content: 'Не вдалося отримати відповідь. Спробуйте ще раз.',
         },
@@ -114,9 +120,9 @@ export function AIChatPage() {
             Напишіть, наприклад: «2-кімнатна квартира в Києві до $80k».
           </p>
         )}
-        {messages.map((msg, i) => (
+        {messages.map((msg) => (
           <div
-            key={i}
+            key={msg.key}
             className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}
           >
             <div
