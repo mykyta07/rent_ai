@@ -39,6 +39,15 @@ export type PropertyListItem = {
   is_mine: boolean
 }
 
+/** Публічні дані власника з GET /api/properties/:id/ (може бути null для імпорту). */
+export type PropertyOwnerPublic = {
+  id: number
+  username: string
+  first_name: string
+  last_name: string
+  date_joined: string
+}
+
 export type PropertyDetail = {
   id: number
   title: string
@@ -58,6 +67,8 @@ export type PropertyDetail = {
   location: Location
   photos: PropertyPhoto[]
   created_at: string
+  /** Відсутній або null — імпорт / старі записи без власника в БД. */
+  owner?: PropertyOwnerPublic | null
   is_mine: boolean
 }
 

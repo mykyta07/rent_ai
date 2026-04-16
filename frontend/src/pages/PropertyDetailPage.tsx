@@ -7,6 +7,7 @@ import {
   Pencil,
   Sparkles,
   Trash2,
+  User,
 } from 'lucide-react'
 import {
   deleteProperty,
@@ -15,10 +16,112 @@ import {
   fetchPropertyPhotos,
 } from '../api/properties'
 import { explainPropertyBrief } from '../api/ai'
-import type { PropertyDetail, PropertyPhoto, Location } from '../api/types'
+import type { PropertyDetail, PropertyOwnerPublic, PropertyPhoto, Location } from '../api/types'
 import { formatApiError, formatMoney, realtyTypeLabel, saleTypeLabel } from '../lib/format'
 import { useFavorites } from '../context/FavoritesContext'
 import { useAuth } from '../context/AuthContext'
+
+/**
+ * Ті самі «автори», що й у команді `assign_demo_authors` (до призначення owner у БД).
+ * Відображаються так само, як реальні користувачі — без пояснень про імпорт/пробний запис.
+ */
+const SYNTHETIC_AUTHORS: PropertyOwnerPublic[] = [
+  {
+    id: 9001,
+    username: 'olena_petryk',
+    first_name: 'Олена',
+    last_name: 'Петрик',
+    date_joined: '2023-11-12T12:00:00.000Z',
+  },
+  {
+    id: 9002,
+    username: 'andriy_shevchenko',
+    first_name: 'Андрій',
+    last_name: 'Шевченко',
+    date_joined: '2024-02-03T10:00:00.000Z',
+  },
+  {
+    id: 9003,
+    username: 'kateryna_bondar',
+    first_name: 'Катерина',
+    last_name: 'Бондар',
+    date_joined: '2024-04-18T09:30:00.000Z',
+  },
+  {
+    id: 9004,
+    username: 'dmytro_melnyk',
+    first_name: 'Дмитро',
+    last_name: 'Мельник',
+    date_joined: '2024-07-22T14:00:00.000Z',
+  },
+  {
+    id: 9005,
+    username: 'solomiia_hrytsenko',
+    first_name: 'Соломія',
+    last_name: 'Гриценко',
+    date_joined: '2024-09-05T11:15:00.000Z',
+  },
+]
+
+function syntheticAuthorForProperty(propertyId: number): PropertyOwnerPublic {
+  return SYNTHETIC_AUTHORS[propertyId % SYNTHETIC_AUTHORS.length]
+}
+
+function ownerDisplayName(o: PropertyOwnerPublic): string {
+  const full = [o.first_name, o.last_name].filter(Boolean).join(' ').trim()
+  return full || o.username
+}
+
+function ownerInitials(o: PropertyOwnerPublic): string {
+  const full = [o.first_name, o.last_name].filter(Boolean).join(' ').trim()
+  if (full) {
+    const parts = full.split(/\s+/)
+    const a = parts[0]?.[0] ?? ''
+    const b = parts[1]?.[0] ?? ''
+    return (a + b).toUpperCase() || o.username.slice(0, 2).toUpperCase()
+  }
+  return o.username.slice(0, 2).toUpperCase()
+}
+
+function formatJoined(iso: string): string {
+  try {
+    return new Intl.DateTimeFormat('uk-UA', {
+      month: 'long',
+      year: 'numeric',
+    }).format(new Date(iso))
+  } catch {
+    return ''
+  }
+}
+
+function PropertyAuthorCard({ detail }: { detail: PropertyDetail }) {
+  const owner = detail.owner ?? syntheticAuthorForProperty(detail.id)
+
+  return (
+    <div className="rounded-3xl border border-slate-100 bg-white p-6 shadow-sm">
+      <h2 className="inline-flex items-center gap-2 font-semibold text-slate-900">
+        <User className="h-4 w-4 text-brand" />
+        Автор оголошення
+      </h2>
+
+      <div className="mt-4 flex gap-4">
+        <div
+          className="flex h-14 w-14 shrink-0 items-center justify-center rounded-2xl bg-brand/15 text-sm font-bold text-brand-dark"
+          aria-hidden
+        >
+          {ownerInitials(owner)}
+        </div>
+        <div className="min-w-0 flex-1">
+          <p className="font-medium text-slate-900">{ownerDisplayName(owner)}</p>
+          <p className="mt-0.5 text-sm text-slate-500">@{owner.username}</p>
+          <p className="mt-2 text-xs text-slate-500">
+            На платформі з {formatJoined(owner.date_joined) || '—'}
+          </p>
+        </div>
+      </div>
+    </div>
+  )
+}
 
 export function PropertyDetailPage() {
   const { id } = useParams<{ id: string }>()
@@ -271,6 +374,8 @@ export function PropertyDetailPage() {
               )}
             </div>
           </div>
+
+          <PropertyAuthorCard detail={detail} />
 
           <div className="rounded-3xl border border-brand/15 bg-brand/5 p-6 shadow-sm">
             <h2 className="inline-flex items-center gap-2 font-semibold text-slate-900">
