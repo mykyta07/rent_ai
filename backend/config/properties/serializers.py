@@ -1,5 +1,17 @@
+from django.contrib.auth import get_user_model
 from rest_framework import serializers
 from .models import Property, Location, PropertyPhoto
+
+User = get_user_model()
+
+
+class PropertyOwnerPublicSerializer(serializers.ModelSerializer):
+    """Публічні дані власника оголошення для картки на сторінці об'єкта."""
+
+    class Meta:
+        model = User
+        fields = ['id', 'username', 'first_name', 'last_name', 'date_joined']
+        read_only_fields = fields
 
 
 class LocationSerializer(serializers.ModelSerializer):
@@ -56,6 +68,7 @@ class PropertyDetailSerializer(serializers.ModelSerializer):
     """Детальний серіалізатор з усією інформацією"""
     location = LocationSerializer(read_only=True)
     photos = PropertyPhotoSerializer(many=True, read_only=True)
+    owner = PropertyOwnerPublicSerializer(read_only=True)
     is_mine = serializers.SerializerMethodField()
 
     class Meta:
@@ -65,7 +78,7 @@ class PropertyDetailSerializer(serializers.ModelSerializer):
             'price', 'currency', 'rooms_count', 'total_area',
             'living_area', 'kitchen_area', 'floor', 'floors_count',
             'building_type', 'is_commercial', 'realty_type', 'sale_type',
-            'location', 'photos', 'created_at', 'is_mine'
+            'location', 'photos', 'created_at', 'owner', 'is_mine'
         ]
 
     def get_is_mine(self, obj):

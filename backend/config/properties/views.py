@@ -141,7 +141,7 @@ class PropertyDetailView(generics.RetrieveAPIView):
     
     Повертає детальну інформацію про конкретний об'єкт
     """
-    queryset = Property.objects.select_related('location').prefetch_related('photos').all()
+    queryset = Property.objects.select_related('location', 'owner').prefetch_related('photos').all()
     serializer_class = PropertyDetailSerializer
     permission_classes = [IsAuthenticatedOrReadOnly]
     lookup_field = 'id'
